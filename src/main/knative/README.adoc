@@ -1,0 +1,9 @@
+= README
+
+This directory contains descriptors for Knative
+
+* `ksource.yml`: deploy the gateway as a source. This file also contains the definition of a Kubernetes service to expose the REST-port to the outside world (Ingress / OpenShift route still required)
+* ksvc.yml: deploy the gateway as a KN-Service. Knative deploys this as a normal Knative-service and provides a kubernetes-service for it. It will also scale this up and down on demand
+
+Both variants expect a `K_SINK` to be provided. Knative will inject this into the pod's env variables for the source case.
+

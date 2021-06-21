@@ -2,18 +2,16 @@ package com.redhat.cloud.notifications;
 
 import com.redhat.cloud.notifications.ingress.Action;
 import com.redhat.cloud.notifications.ingress.Event;
-import com.redhat.cloud.notifications.ingress.Metadata;
 import org.apache.avro.io.DatumWriter;
 import org.apache.avro.io.EncoderFactory;
 import org.apache.avro.io.JsonEncoder;
 import org.apache.avro.specific.SpecificDatumWriter;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.eclipse.microprofile.metrics.Counter;
 import org.eclipse.microprofile.metrics.annotation.Metric;
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponses;
-import org.eclipse.microprofile.reactive.messaging.Channel;
-import org.eclipse.microprofile.reactive.messaging.Emitter;
 
 import javax.enterprise.context.ApplicationScoped;
 import javax.inject.Inject;
@@ -28,6 +26,10 @@ import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -35,6 +37,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.UUID;
 
 
 @ApplicationScoped
@@ -43,10 +47,11 @@ import java.util.Map;
 @Produces(MediaType.APPLICATION_JSON)
 public class GwResource {
 
+    @ConfigProperty(name = "mp.messaging.outgoing.egress.enabled", defaultValue = "true")
+    boolean kafkaEnabled;
 
-    @Inject
-    @Channel("egress")
-    Emitter<String> emitter;
+    @ConfigProperty(name = "k.sink")
+    Optional<String> knativeSink;
 
     @Inject
     @Metric(name = "notifications.gw.received")
@@ -72,7 +77,7 @@ public class GwResource {
         builder.setTimestamp(parsedTime);
         builder.setContext(new HashMap());
         List<Event> eventList = new ArrayList<>(1);
-        Metadata meta = new com.redhat.cloud.notifications.ingress.Metadata();
+        com.redhat.cloud.notifications.ingress.Metadata meta = new com.redhat.cloud.notifications.ingress.Metadata();
         Event event = new Event(meta, ra.getPayload());
         eventList.add(event);
         builder.setEvents(eventList);
@@ -85,14 +90,43 @@ public class GwResource {
 
         try {
             String serializedAction = serializeAction(message);
-            emitter.send(serializedAction);
+            if (kafkaEnabled) {
+                KafkaSender ks = new KafkaSender();
+                ks.send(serializedAction);
+            } else {
+                sendToKnative(serializedAction, knativeSink, message.getAccountId());
+            }
             forwardedActions.inc();
-        } catch (IOException e) {
+        } catch (Exception e) {
             e.printStackTrace();  // TODO: Customise this generated block
             return Response.serverError().entity(e.getMessage()).build();
         }
 
         return Response.ok().build();
+    }
+
+    private void sendToKnative(String ce, Optional<String> sink, String account) throws IOException, InterruptedException {
+
+        if (sink.isEmpty()) {
+            throw new IllegalStateException("No K_SINK provided");
+        }
+
+        HttpClient client = HttpClient.newBuilder().build();
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(sink.get()))
+                .header("Ce-Id","notification-gw-" + account + "-" + UUID.randomUUID()) // This has to be unique
+                .header("Ce-Specversion", "1.0")
+                .header("Ce-Type", "com.redhat.cloud.notification")
+                .header("Ce-Source", "notifications-gw")
+                .header("Content-Type","application/json")
+                .header("Ce-rhaccount", account) // custom property, must be [a-z0-9]+
+                .POST(HttpRequest.BodyPublishers.ofString(ce))
+                .build();
+
+        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+        if (!((response.statusCode() / 100 ) == 2)) {
+            throw new IOException("Status was " + response.statusCode());
+        }
 
     }
 

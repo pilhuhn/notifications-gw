@@ -1,0 +1,40 @@
+apiVersion: sources.knative.dev/v1
+kind: ContainerSource
+metadata:
+  name: notifications-gw
+  labels:
+    app: notifications-gw
+spec:
+  template:
+    spec:
+      containers:
+        - resources:
+          image: >-
+                  pilhuhn/notifications-gw:v2
+          imagePullPolicy: Always
+          ports:
+            - name: http1
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: MP_MESSAGING_OUTGOING_EGRESS_ENABLED
+              value: "false"
+  sink:
+    ref:
+      # This injects K_SINK into our env, we have nothing to do
+      apiVersion: eventing.knative.dev/v1
+      kind: Broker
+      name: mybroker
+---
+# expose the deployment as Kube service
+kind: Service
+apiVersion: v1
+metadata:
+  name: notifications-gw
+spec:
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8080
+  selector:
+    sources.knative.dev/containerSource: notifications-gw

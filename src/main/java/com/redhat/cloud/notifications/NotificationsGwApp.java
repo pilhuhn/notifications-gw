@@ -33,6 +33,9 @@ public class NotificationsGwApp {
 
     void init(@Observes StartupEvent ev) {
         showVersionInfo();
+
+        LOG.info("Kafka enabled? " + System.getenv("MP_MESSAGING_OUTGOING_EGRESS_ENABLED"));
+        LOG.info("K_Sink? " + System.getenv("K_SINK"));
     }
 
     private void showVersionInfo() {

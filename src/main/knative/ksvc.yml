@@ -1,0 +1,25 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: notifications-gw
+  labels:
+    app: notifications
+spec:
+  template:
+    spec:
+      containers:
+        - resources:
+          image: >-
+                  pilhuhn/notifications-gw:v2
+          imagePullPolicy: Always
+          ports:
+            - name: http1
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: MP_MESSAGING_OUTGOING_EGRESS_ENABLED
+              value: "false"
+            - name: K_SINK
+              value: http://broker-ingress.knative-eventing.svc.cluster.local/default/mybroker
+#            - name: KAFKA_BOOTSTRAP_SERVERS
+#              value: 'blabla'
